@@ -10,6 +10,9 @@ public sealed class AnalyzeResponse
     [JsonPropertyName("extractedAttributes")]
     public ExtractedAttributes ExtractedAttributes { get; init; } = new();
 
+    [JsonPropertyName("dynamicAttributes")]
+    public IReadOnlyList<DynamicAttribute> DynamicAttributes { get; init; } = [];
+
     [JsonPropertyName("rawAzureEntities")]
     public IReadOnlyList<RawAzureEntity> RawAzureEntities { get; init; } = [];
 
@@ -18,4 +21,7 @@ public sealed class AnalyzeResponse
 
     [JsonPropertyName("roleMethod")]
     public string RoleMethod { get; init; } = "fallback";
+
+    [JsonPropertyName("processingInfo")]
+    public ProcessingInfo ProcessingInfo { get; init; } = new();
 }

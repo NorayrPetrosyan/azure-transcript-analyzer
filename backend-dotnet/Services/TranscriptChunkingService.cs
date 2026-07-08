@@ -7,13 +7,19 @@ public sealed class TranscriptChunkingService(ConfigurationService configuration
     public IReadOnlyList<TranscriptChunk> Split(string transcript, bool includeOverlap = true)
     {
         var chunkSize = Math.Max(500, configuration.TranscriptChunkSize);
-        var overlap = includeOverlap
-            ? Math.Clamp(configuration.TranscriptChunkOverlap, 0, chunkSize / 4)
+        var overlapLines = includeOverlap
+            ? Math.Clamp(configuration.TranscriptChunkOverlap, 0, 25)
             : 0;
 
         if (transcript.Length <= chunkSize)
         {
             return [new TranscriptChunk { Index = 0, Start = 0, End = transcript.Length, Text = transcript }];
+        }
+
+        var lineChunks = SplitByLines(transcript, chunkSize, overlapLines);
+        if (lineChunks.Count > 0)
+        {
+            return lineChunks;
         }
 
         var chunks = new List<TranscriptChunk>();
@@ -44,14 +50,78 @@ public sealed class TranscriptChunkingService(ConfigurationService configuration
                 break;
             }
 
-            var nextStart = Math.Max(0, end - overlap);
-            start = nextStart > start ? nextStart : end;
+            start = end;
         }
 
         return chunks
             .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
             .ToList();
     }
+
+    private static IReadOnlyList<TranscriptChunk> SplitByLines(string transcript, int chunkSize, int overlapLines)
+    {
+        var lineMatches = transcript.Split('\n');
+        if (lineMatches.Length <= 1)
+        {
+            return [];
+        }
+
+        var chunks = new List<TranscriptChunk>();
+        var currentLines = new List<string>();
+        var currentStart = 0;
+        var cursor = 0;
+
+        foreach (var rawLine in lineMatches)
+        {
+            var line = rawLine.TrimEnd('\r');
+            var lineWithNewline = cursor + rawLine.Length < transcript.Length ? $"{line}\n" : line;
+
+            if (currentLines.Count > 0 && CurrentLength(currentLines) + lineWithNewline.Length > chunkSize)
+            {
+                AddLineChunk(chunks, currentLines, currentStart, cursor);
+
+                var overlap = overlapLines > 0
+                    ? currentLines.TakeLast(overlapLines).ToList()
+                    : [];
+
+                currentStart = Math.Max(0, cursor - CurrentLength(overlap));
+                currentLines = overlap;
+            }
+
+            if (lineWithNewline.Length > chunkSize && currentLines.Count == 0)
+            {
+                return [];
+            }
+
+            currentLines.Add(lineWithNewline);
+            cursor += rawLine.Length + (cursor + rawLine.Length < transcript.Length ? 1 : 0);
+        }
+
+        AddLineChunk(chunks, currentLines, currentStart, transcript.Length);
+
+        return chunks
+            .Where(chunk => !string.IsNullOrWhiteSpace(chunk.Text))
+            .ToList();
+    }
+
+    private static void AddLineChunk(List<TranscriptChunk> chunks, IReadOnlyList<string> lines, int start, int end)
+    {
+        var text = string.Concat(lines).Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        chunks.Add(new TranscriptChunk
+        {
+            Index = chunks.Count,
+            Start = start,
+            End = end,
+            Text = text
+        });
+    }
+
+    private static int CurrentLength(IEnumerable<string> lines) => lines.Sum(line => line.Length);
 
     private static int FindBoundary(string text, int start, int targetEnd)
     {

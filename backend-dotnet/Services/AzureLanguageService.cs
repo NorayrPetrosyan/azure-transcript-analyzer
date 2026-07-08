@@ -16,16 +16,7 @@ public sealed class AzureLanguageService(
         ["PhoneNumber"] = nameof(ExtractedAttributes.PhoneNumber),
         ["Email"] = nameof(ExtractedAttributes.Email),
         ["USSocialSecurityNumber"] = nameof(ExtractedAttributes.SocialSecurityNumber),
-        ["EUPassportNumber"] = nameof(ExtractedAttributes.SocialSecurityNumber),
-        ["InternationalBankingAccountNumber"] = "Other",
-        ["Organization"] = "Other",
-        ["DateTime"] = "Other",
-        ["URL"] = "Other",
-        ["IPAddress"] = "Other",
-        ["Age"] = "Other",
-        ["Quantity"] = "Other",
-        ["CreditCardNumber"] = "Other",
-        ["BankAccountNumber"] = "Other"
+        ["EUPassportNumber"] = nameof(ExtractedAttributes.SocialSecurityNumber)
     };
 
     public async Task<(IReadOnlyList<ExtractedAttributes> Attributes, IReadOnlyList<RawAzureEntity> RawEntities, IReadOnlyList<string> Warnings)> AnalyzeChunksAsync(
@@ -38,37 +29,54 @@ public sealed class AzureLanguageService(
             return ([], [], ["Azure AI Language is not configured"]);
         }
 
-        var attributes = new List<ExtractedAttributes>();
-        var rawEntities = new List<RawAzureEntity>();
-        var warnings = new List<string>();
+        using var semaphore = new SemaphoreSlim(configuration.MaxConcurrentChunks);
+        var tasks = chunks.Select(chunk => AnalyzeChunkWithLimitAsync(chunk, language, semaphore, cancellationToken));
+        var results = await Task.WhenAll(tasks);
 
-        foreach (var chunk in chunks)
-        {
-            var (chunkAttributes, chunkRawEntities, chunkWarning) = await AnalyzeChunkAsync(chunk, language, cancellationToken);
-            attributes.Add(chunkAttributes);
-            rawEntities.AddRange(chunkRawEntities);
-
-            if (!string.IsNullOrWhiteSpace(chunkWarning))
-            {
-                warnings.Add(chunkWarning);
-            }
-        }
+        var orderedResults = results.OrderBy(result => result.ChunkIndex).ToList();
+        var attributes = orderedResults.Select(result => result.Attributes).ToList();
+        var rawEntities = orderedResults.SelectMany(result => result.RawEntities).ToList();
+        var warnings = orderedResults
+            .Select(result => result.Warning)
+            .Where(warning => !string.IsNullOrWhiteSpace(warning))
+            .Cast<string>()
+            .ToList();
 
         return (attributes, rawEntities, warnings);
     }
 
-    private async Task<(ExtractedAttributes Attributes, IReadOnlyList<RawAzureEntity> RawEntities, string? Warning)> AnalyzeChunkAsync(
+    private async Task<(int ChunkIndex, ExtractedAttributes Attributes, IReadOnlyList<RawAzureEntity> RawEntities, string? Warning)> AnalyzeChunkWithLimitAsync(
+        TranscriptChunk chunk,
+        string? language,
+        SemaphoreSlim semaphore,
+        CancellationToken cancellationToken)
+    {
+        await semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await AnalyzeChunkAsync(chunk, language, cancellationToken);
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+    }
+
+    private async Task<(int ChunkIndex, ExtractedAttributes Attributes, IReadOnlyList<RawAzureEntity> RawEntities, string? Warning)> AnalyzeChunkAsync(
         TranscriptChunk chunk,
         string? language,
         CancellationToken cancellationToken)
     {
         if (!configuration.AzureLanguageConfigured)
         {
-            return (new ExtractedAttributes(), [], "Azure AI Language is not configured");
+            return (chunk.Index, new ExtractedAttributes(), [], "Azure AI Language is not configured");
         }
 
         try
         {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(configuration.AzureLanguageTimeoutSeconds));
+
             var endpoint = configuration.AzureLanguageEndpoint.TrimEnd('/');
             var url = $"{endpoint}/language/:analyze-text?api-version=2023-04-01";
             var document = new Dictionary<string, object?>
@@ -93,16 +101,16 @@ public sealed class AzureLanguageService(
             });
 
             var client = httpClientFactory.CreateClient();
-            using var response = await client.SendAsync(request, cancellationToken);
+            using var response = await client.SendAsync(request, timeoutCts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogWarning("Azure Language failed with status {StatusCode}", response.StatusCode);
-                return (new ExtractedAttributes(), [], $"Azure AI Language failed for chunk {chunk.Index + 1} with status {(int)response.StatusCode}");
+                return (chunk.Index, new ExtractedAttributes(), [], $"Azure AI Language failed for chunk {chunk.Index + 1} with status {(int)response.StatusCode}");
             }
 
             using var responseDocument = await JsonDocument.ParseAsync(
-                await response.Content.ReadAsStreamAsync(cancellationToken),
-                cancellationToken: cancellationToken);
+                await response.Content.ReadAsStreamAsync(timeoutCts.Token),
+                cancellationToken: timeoutCts.Token);
 
             var result = responseDocument.RootElement
                 .GetProperty("results")
@@ -163,12 +171,17 @@ public sealed class AzureLanguageService(
                 SetField(attrs, field, text);
             }
 
-            return (attrs, raw, null);
+            return (chunk.Index, attrs, raw, null);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Azure Language analysis timed out");
+            return (chunk.Index, new ExtractedAttributes(), [], $"Azure AI Language timed out for chunk {chunk.Index + 1}");
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Azure Language analysis failed");
-            return (new ExtractedAttributes(), [], $"Azure AI Language failed for chunk {chunk.Index + 1}: {ex.Message}");
+            return (chunk.Index, new ExtractedAttributes(), [], $"Azure AI Language failed for chunk {chunk.Index + 1}: {ex.Message}");
         }
     }
 

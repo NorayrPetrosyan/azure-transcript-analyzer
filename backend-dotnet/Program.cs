@@ -31,6 +31,7 @@ builder.Services.AddSingleton<TranscriptChunkingService>();
 builder.Services.AddSingleton<RegexExtractionService>();
 builder.Services.AddSingleton<RoleDetectionService>();
 builder.Services.AddSingleton<AzureLanguageService>();
+builder.Services.AddSingleton<DynamicAttributeExtractionService>();
 builder.Services.AddSingleton<AnalysisResultFileWriter>();
 builder.Services.AddSingleton<TranscriptAnalysisService>();
 

@@ -1,31 +1,37 @@
-# Project Agent Instructions
+# Codex Instructions
 
-This project is finalized around a React/Vite frontend and a C#/.NET ASP.NET Core Web API backend.
+This project was originally generated with Claude Code.
 
-## Backend
+## Project purpose
 
-- Use `backend-dotnet` for all backend work.
-- Do not recreate or depend on the old Python/FastAPI backend.
-- Keep the public API compatible with the React frontend.
-- Preserve support for both request fields: `transcript` and `transcriptText`.
-- Keep `/health`, `/analyze`, and `/openapi/v1.json` available.
-- Keep local TXT output storage under `backend-dotnet/local-results/`.
-- Do not add a database, Entity Framework, or database packages.
+Azure AI Transcript Analyzer is a local web app for extracting structured PII attributes from call-center transcripts in English and Armenian.
 
-## Frontend
+Current stack:
+- Frontend: React/Vite/JavaScript
+- Backend: Python/FastAPI
+- Azure AI Language for PII/entity extraction
+- Regex fallback extraction
+- Optional Azure OpenAI-related service code may exist in backend services
 
-- Keep the React/Vite frontend in `frontend`.
-- Use `VITE_API_BASE_URL` for the backend URL.
-- Do not hardcode deployment URLs or secrets.
+## Important rules
 
-## Security
+- Do not rewrite the whole project unless explicitly requested.
+- Do not delete the current Python backend unless explicitly requested.
+- Before editing, inspect the project and explain the plan.
+- Prefer small, reviewable changes.
+- Keep the frontend API contract stable unless requirements say otherwise.
+- Do not commit secrets, API keys, `.env`, credentials, real transcripts, real PII, `venv`, or `node_modules`.
+- Use sanitized sample transcripts only.
+- If migrating backend to C#, create a new folder named `backend-dotnet` first.
+- Keep the old `backend/` folder until the C# backend is tested.
+- After changes, explain what files changed and how to run/test the app.
 
-- Never commit `.env` files, API keys, credentials, real transcripts, or real PII.
-- Use only sanitized examples in docs, tests, and prompts.
-- Keep generated folders such as `node_modules`, `dist`, `bin`, `obj`, and `local-results` out of Git.
+## Local run commands
 
-## Verification
+Backend:
 
-- Build the .NET backend with `dotnet build backend-dotnet/backend-dotnet.csproj`.
-- Run the backend with `dotnet run --project backend-dotnet/backend-dotnet.csproj --no-launch-profile --urls http://localhost:8000`.
-- Run the frontend with `VITE_API_BASE_URL=http://localhost:8000 npm run dev` from `frontend`.
+```bash
+cd backend
+source venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000

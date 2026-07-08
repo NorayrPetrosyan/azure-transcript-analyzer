@@ -44,6 +44,21 @@ public sealed class AnalysisResultFileWriter(IWebHostEnvironment environment)
         builder.AppendLine($"Language: {Normalize(language)}");
         builder.AppendLine($"Transcript Length: {transcriptLength}");
         builder.AppendLine($"Role Method: {response.RoleMethod}");
+        builder.AppendLine($"Used Chunking: {response.ProcessingInfo.UsedChunking}");
+        builder.AppendLine($"Chunk Count: {response.ProcessingInfo.ChunkCount}");
+        builder.AppendLine($"Processing Language: {Normalize(response.ProcessingInfo.Language)}");
+        builder.AppendLine($"Large Transcript Safe Mode: {response.ProcessingInfo.LargeTranscriptSafeMode}");
+        builder.AppendLine($"Large Transcript Threshold Characters: {response.ProcessingInfo.LargeTranscriptThresholdCharacters}");
+        builder.AppendLine($"Failed OpenAI Chunks: {response.ProcessingInfo.FailedOpenAiChunks}");
+        builder.AppendLine($"OpenAI Failed Chunks: {FormatChunkList(response.ProcessingInfo.OpenAiFailedChunks)}");
+        builder.AppendLine($"Dynamic AI Skipped Chunks: {FormatChunkList(response.ProcessingInfo.DynamicAiSkippedChunks)}");
+        builder.AppendLine($"Fallback Used: {response.ProcessingInfo.FallbackUsed}");
+        builder.AppendLine($"Retried OpenAI Chunks: {response.ProcessingInfo.RetriedOpenAiChunks}");
+        builder.AppendLine($"Fallback Chunks: {FormatChunkList(response.ProcessingInfo.UsedFallbackForChunks)}");
+        builder.AppendLine($"Total Duration Ms: {response.ProcessingInfo.TotalDurationMs}");
+        builder.AppendLine($"Azure OpenAI Duration Ms: {response.ProcessingInfo.AzureOpenAiDurationMs}");
+        builder.AppendLine($"Azure Language Duration Ms: {response.ProcessingInfo.AzureLanguageDurationMs}");
+        builder.AppendLine($"Local Extraction Duration Ms: {response.ProcessingInfo.LocalExtractionDurationMs}");
         builder.AppendLine();
 
         builder.AppendLine("Conversation");
@@ -74,6 +89,26 @@ public sealed class AnalysisResultFileWriter(IWebHostEnvironment environment)
         AppendList(builder, "Conditions", response.ExtractedAttributes.Conditions);
         AppendList(builder, "Medications", response.ExtractedAttributes.Medications);
         AppendList(builder, "Other", response.ExtractedAttributes.Other);
+
+        builder.AppendLine();
+        builder.AppendLine("Dynamic Attributes");
+        builder.AppendLine("------------------");
+        if (response.DynamicAttributes.Count == 0)
+        {
+            builder.AppendLine("(none)");
+        }
+        else
+        {
+            foreach (var attribute in response.DynamicAttributes)
+            {
+                builder.AppendLine($"- {attribute.Label} ({attribute.Key})");
+                builder.AppendLine($"  Value: {attribute.Value}");
+                builder.AppendLine($"  Category: {attribute.Category}");
+                builder.AppendLine($"  Confidence: {attribute.Confidence:0.###}");
+                builder.AppendLine($"  Source: {attribute.Source}");
+                builder.AppendLine($"  Chunk Index: {attribute.ChunkIndex}");
+            }
+        }
 
         builder.AppendLine();
         builder.AppendLine("Raw Azure Entities");
@@ -126,4 +161,7 @@ public sealed class AnalysisResultFileWriter(IWebHostEnvironment environment)
 
     private static string Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? "(not detected)" : value.Trim();
+
+    private static string FormatChunkList(IReadOnlyList<int> chunks) =>
+        chunks.Count == 0 ? "(none)" : string.Join(", ", chunks);
 }

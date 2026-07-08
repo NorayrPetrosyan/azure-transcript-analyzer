@@ -7,7 +7,7 @@ A local web app for analyzing already-transcribed call-center text in English an
 - Backend: C# / .NET / ASP.NET Core Web API in `backend-dotnet`
 - Frontend: React + Vite in `frontend`
 - Azure AI Language: PII/entity extraction when configured
-- Azure OpenAI: role detection when configured and explicit labels are missing
+- Azure OpenAI: role detection when configured and dynamic clinic/case attribute extraction
 - Regex fallback: local extraction when Azure services are missing or fail
 
 The final backend is `backend-dotnet`. There is no Python/FastAPI backend in the final delivery.
@@ -24,6 +24,8 @@ export AZURE_LANGUAGE_KEY="<your-language-key>"
 export AZURE_OPENAI_ENDPOINT="https://<your-openai-resource>.openai.azure.com/"
 export AZURE_OPENAI_KEY="<your-openai-key>"
 export AZURE_OPENAI_DEPLOYMENT="<your-deployment-name>"
+export MAX_CONCURRENT_CHUNKS=3
+export EXTERNAL_REQUEST_TIMEOUT_SECONDS=60
 ```
 
 If Azure services are not configured, the backend still runs with regex extraction and fallback speaker labels.
@@ -104,11 +106,24 @@ The .NET backend accepts `language` and `transcriptText`:
     "medications": [],
     "other": []
   },
+  "dynamicAttributes": [
+    {
+      "key": "appointment_request",
+      "label": "Appointment request",
+      "value": "Caller wants to book a follow-up with Dr. Smith",
+      "category": "appointment",
+      "confidence": 0.82,
+      "source": "azure-openai",
+      "chunkIndex": 0
+    }
+  ],
   "rawAzureEntities": [],
   "warning": null,
   "roleMethod": "labels"
 }
 ```
+
+`dynamicAttributes` contains Azure OpenAI-detected clinic/case details that do not fit neatly into the fixed `extractedAttributes` fields, such as symptoms, reason for call, appointment requests, callback requests, medication details, allergies, insurance/OHIP/payment issues, pharmacy details, urgent concerns, and follow-up actions.
 
 ## Manual Curl Tests
 
@@ -143,3 +158,20 @@ curl -X POST http://localhost:8000/analyze \
   -H "Content-Type: application/json" \
   -d '{"language":"en","transcriptText":"Agent: Hello.\\nCaller: My name is John Smith."}'
 ```
+
+Dynamic clinic information:
+
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"language":"en","transcriptText":"Agent: How can I help?\nCaller: I have chest tightness and need a follow-up appointment with Dr. Smith next week. Please call me back after 3 PM. I take metformin and I am allergic to penicillin."}'
+```
+
+Long transcript testing:
+
+```bash
+TRANSCRIPT_CHUNK_SIZE=300 TRANSCRIPT_CHUNK_OVERLAP=40 MAX_CONCURRENT_CHUNKS=2 \
+dotnet run --project backend-dotnet/backend-dotnet.csproj --no-launch-profile --urls http://localhost:8000
+```
+
+Then send a longer transcript with repeated details across chunks and confirm duplicate `dynamicAttributes` are merged.
